@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+/models/
+/data/dataset_test.feather
+/results/
