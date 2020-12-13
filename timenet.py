@@ -90,7 +90,8 @@ class SimpleSeriesGenerator(Sequence):
         if self.X_only:
             return X
         else:
-            return X, X
+            X_rev = np.array([x[::-1] for x in X])
+            return X, X_rev
 
     def __len__(self):
         return int(np.floor(self.series.shape[0] / self.batch_size))
@@ -125,11 +126,11 @@ class TimeNet:
         return encode, states
 
     def decoder_block(self, encode):
-        decode = encode
+        decode = K.reverse(encode, axes=0)
         for i in range(self.num_layers, 0, -1):
             if self.dropout > 0.0 and i > 0:  # skip these for first layer for symmetry
                 decode = Dropout(self.dropout, name='drop_decode_{}'.format(i))(decode)
-            decode = SimpleRNN(self.size, name='decode_{}'.format(i), return_sequences=True)(decode)
+            decode = GRU(self.size, name='decode_{}'.format(i), return_sequences=True)(decode)
         decode = TimeDistributed(Dense(1, activation='linear'), name='time_dist')(decode)
         return decode
 
