@@ -11,7 +11,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.utils import Sequence
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.layers import Input, Dense, TimeDistributed, GRU, Dropout, SimpleRNN, Lambda
+from tensorflow.keras.layers import Input, Dense, TimeDistributed, GRU, Dropout, Lambda, Masking
 from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, CSVLogger, EarlyStopping, ReduceLROnPlateau
 
 OUTPUT_DIR = os.path.join("models")
@@ -109,10 +109,9 @@ class TimeNet:
         self.init_model()
 
     def encoder_block(self, model_input):
-        encode = model_input
-        mask = Lambda(lambda input: K.not_equal(input, 0))(model_input)
         states_list = list()
-        encode, states = GRU(self.size, name='encode_1', return_state=True, return_sequences=True)(encode,mask=mask)
+        masked_input = Masking(mask_value=0.0, input_shape=(None,1))(model_input)
+        encode, states = GRU(self.size, name='encode_1', return_state=True, return_sequences=True)(masked_input)
         states_list.append(states)
         if self.dropout > 0.0:
             encode = Dropout(self.dropout, name='drop_encode_1')(encode)
@@ -122,16 +121,18 @@ class TimeNet:
             if self.dropout > 0.0:
                 encode = Dropout(self.dropout, name='drop_encode_{}'.format(i))(encode)
         states = K.concatenate(states_list, axis=1)
-        print(states.shape)
         return encode, states
 
-    def decoder_block(self, encode):
+    def decoder_block(self, input, encode):
+        def trimOutputs(x):
+            return x[0]*K.cast(K.not_equal(x[1],0), dtype=K.floatx())
         decode = K.reverse(encode, axes=0)
         for i in range(self.num_layers, 0, -1):
             if self.dropout > 0.0 and i > 0:  # skip these for first layer for symmetry
                 decode = Dropout(self.dropout, name='drop_decode_{}'.format(i))(decode)
             decode = GRU(self.size, name='decode_{}'.format(i), return_sequences=True)(decode)
         decode = TimeDistributed(Dense(1, activation='linear'), name='time_dist')(decode)
+        decode = Lambda(trimOutputs)([decode,input])  # Trim padded values
         return decode
 
 
@@ -139,7 +140,7 @@ class TimeNet:
         model_input = Input(shape=(None, 1), name='main_input')
         encode, states = self.encoder_block(model_input)
         self.encoder = Model(model_input, states)
-        decode = self.decoder_block(encode)
+        decode = self.decoder_block(model_input, encode)
         self.model = Model(model_input, decode)
         self.model.summary()
 
